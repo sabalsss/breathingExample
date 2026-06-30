@@ -489,9 +489,82 @@
   }
   footer strong { color: var(--ink-dim); font-weight: 600; }
 
+  /* ---------- Practice stats (the rewarding numbers) ---------- */
+  .stats { display: flex; gap: 10px; width: 100%; }
+  .stat {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 13px 8px;
+    border: 1px solid var(--hairline);
+    background: var(--glass);
+    border-radius: 16px;
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+  }
+  .stat .num {
+    font-size: 1.55rem; font-weight: 700; line-height: 1;
+    color: var(--lit); font-variant-numeric: tabular-nums;
+    display: inline-block;
+  }
+  .stat .lbl { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+  .pop { animation: pop 0.55s cubic-bezier(.2,1.5,.4,1); }
+  @keyframes pop { 0%{transform:scale(1)} 35%{transform:scale(1.34)} 100%{transform:scale(1)} }
+
+  /* ---------- Round pips ---------- */
+  .pips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center; min-height: 12px; }
+  .pip {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(255,255,255,0.14);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+    transition: background .35s ease, box-shadow .35s ease;
+  }
+  .pip.filled { background: var(--glow); box-shadow: 0 0 10px var(--glow); }
+  .pips .count-pip { font-size: 0.8rem; color: var(--lit); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+  /* ---------- Completion / round burst ---------- */
+  .burst { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 3; }
+  .burst::after {
+    content: ""; width: 50%; height: 50%; border-radius: 50%;
+    border: 2px solid var(--lit); opacity: 0;
+  }
+  .burst.ripple::after   { animation: ripple .9s ease-out; }
+  .burst.celebrate::after{ animation: celebrate 1.5s ease-out; box-shadow: 0 0 40px var(--glow); }
+  @keyframes ripple    { 0%{opacity:.55;transform:scale(.55)} 100%{opacity:0;transform:scale(1.7)} }
+  @keyframes celebrate { 0%{opacity:.9;transform:scale(.4)} 60%{opacity:.5} 100%{opacity:0;transform:scale(2.5)} }
+
+  /* ---------- Benefits ---------- */
+  .benefits {
+    width: 100%;
+    border: 1px solid var(--hairline);
+    background: var(--glass);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
+    padding: 22px 22px 18px;
+  }
+  .benefits h2 {
+    margin: 0 0 16px; font-size: 1rem; font-weight: 600; letter-spacing: 0.01em;
+    color: var(--lit);
+  }
+  .benefits ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 13px; }
+  .benefits li {
+    display: grid; grid-template-columns: auto 1fr; gap: 13px; align-items: start;
+    font-size: 0.86rem; line-height: 1.5; color: var(--ink-dim);
+  }
+  .benefits li b { color: var(--ink); font-weight: 600; }
+  .benefits li .ico { font-size: 1.2rem; line-height: 1.2; }
+  .benefits-foot {
+    margin: 18px 0 0; font-size: 0.72rem; line-height: 1.6; color: var(--ink-faint);
+    border-top: 1px solid rgba(255,255,255,0.07); padding-top: 13px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     body::before, .stage::before { animation: none; }
     .orb, .dot, .breath-ring { transition: none !important; }
+    .pop { animation: none; }
+    .burst::after { animation: none !important; }
   }
 
   @media (max-width: 400px) {
@@ -507,6 +580,12 @@
   </header>
 
   <main>
+    <div class="stats" id="stats" aria-label="Your practice stats">
+      <div class="stat"><span class="num" id="statStreak">0</span><span class="lbl">🔥 day streak</span></div>
+      <div class="stat"><span class="num" id="statSessions">0</span><span class="lbl">sessions</span></div>
+      <div class="stat"><span class="num" id="statMinutes">0</span><span class="lbl">minutes</span></div>
+    </div>
+
     <div class="stage" id="stage">
       <div class="square" aria-hidden="true"></div>
 
@@ -522,7 +601,11 @@
         <div class="count" id="phaseCount">—</div>
         <div class="round" id="roundLabel"></div>
       </div>
+
+      <div class="burst" id="burst" aria-hidden="true"></div>
     </div>
+
+    <div class="pips" id="pips" aria-hidden="true"></div>
 
     <!-- Live region announces phase changes for screen readers -->
     <div class="sr-only" aria-live="polite" id="announce"></div>
@@ -604,6 +687,22 @@
         </select>
       </div>
     </details>
+
+    <section class="benefits" aria-label="Why box breathing helps">
+      <h2>Why box breathing feels good — and works</h2>
+      <ul>
+        <li><span class="ico">🫁</span><span><b>Calms your nervous system.</b> Slow, equal breaths nudge you out of fight-or-flight into rest-and-digest, easing heart rate and tension.</span></li>
+        <li><span class="ico">🧠</span><span><b>Sharpens focus.</b> Counting and the held pauses give your attention a single anchor — which is why athletes and the military use it before high-pressure moments.</span></li>
+        <li><span class="ico">😌</span><span><b>Lowers stress.</b> Paced breathing is linked in research to reduced anxiety and lower stress hormones.</span></li>
+        <li><span class="ico">😴</span><span><b>Helps you wind down.</b> Downshifting your arousal makes it a great reset before sleep, or right after a hard moment.</span></li>
+        <li><span class="ico">⚡</span><span><b>Works fast, costs nothing.</b> A few rounds can change how you feel — portable, private, and it needs nothing but you.</span></li>
+      </ul>
+      <p class="benefits-foot">
+        Box breathing (a.k.a. four-square breathing) is a simple, evidence-informed way to self-regulate, used by
+        Navy SEALs, athletes, and clinicians. It isn't a medical treatment — if you ever feel lightheaded, just
+        return to normal breathing. Come back daily to keep your streak alive. 🔥
+      </p>
+    </section>
   </main>
 
   <footer>
@@ -647,6 +746,7 @@
     lastFrame: 0,         // performance.now() of previous frame (for dt)
     rounds: 8,            // 0 = unlimited
     roundCount: 0,
+    committed: false,     // has this session been counted into stats yet?
     rafId: null,
     breath: 0,            // 0..1 guided breath position (orb)
     breathPaced: false,   // when true + mic on, real breath drives dot progression
@@ -674,6 +774,11 @@
   const announce = $("announce");
   const startBtn = $("startBtn");
   const resetBtn = $("resetBtn");
+  const burst = $("burst");
+  const pips = $("pips");
+  const statStreak = $("statStreak");
+  const statSessions = $("statSessions");
+  const statMinutes = $("statMinutes");
 
   /* ============================================================
      Dot path geometry
@@ -788,6 +893,7 @@
     if (next >= PHASES.length) {
       next = 0;
       state.roundCount++;
+      onRoundDone();
       if (state.rounds !== 0 && state.roundCount >= state.rounds) {
         finishSession();
         return;
@@ -800,6 +906,7 @@
       next = (next + 1) % PHASES.length;
       if (next === 0) {
         state.roundCount++;
+        onRoundDone();
         if (state.rounds !== 0 && state.roundCount >= state.rounds) { finishSession(); return; }
       }
       guard++;
@@ -824,9 +931,11 @@
     state.running = true;
     state.phaseIndex = 0;
     state.roundCount = 0;
+    state.committed = false;
     state.phaseStart = performance.now();
     state.phaseProgress = 0;
     state.lastFrame = performance.now();
+    buildPips();
     applyPhaseVisual(0, true);
     updateRoundLabel();
     playTone(0);
@@ -857,25 +966,127 @@
     state.running = false;
     if (state.rafId) cancelAnimationFrame(state.rafId);
     startBtn.textContent = "Start";
-    phaseWord.textContent = "complete";
-    phaseCount.textContent = "✓";
-    roundLabel.textContent = state.rounds ? state.rounds + " rounds done" : "";
-    announce.textContent = "Session complete";
+    commitSession();   // count it before celebrating (uses streak in the message)
+    celebrate();
   }
 
   function resetSession() {
+    commitSession();   // credit a stopped-but-≥1-round session (esp. unlimited mode)
     state.running = false;
     if (state.rafId) cancelAnimationFrame(state.rafId);
     state.phaseIndex = 0;
     state.roundCount = 0;
+    state.committed = false;
     state.phaseProgress = 0;
     setBreath(0);
+    buildPips();
     applyPhaseVisual(0, true);
     phaseWord.textContent = "ready";
     phaseCount.textContent = "—";
     roundLabel.textContent = "";
     startBtn.textContent = "Start";
     announce.textContent = "reset";
+  }
+
+  /* ============================================================
+     Rewards — the calm "feels good" loop
+     Persistent streak + sessions + minutes, round pips, and a
+     completion celebration. All local; nothing leaves the page.
+  ============================================================ */
+  const STORE_KEY = "boxbreathe.v1";
+  let stats = { sessions: 0, totalSec: 0, streak: 0, best: 0, lastDay: null };
+  try { const s = JSON.parse(localStorage.getItem(STORE_KEY)); if (s) stats = Object.assign(stats, s); } catch (e) {}
+
+  function popEl(el) { if (!el) return; el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+
+  function renderStats(animate) {
+    statStreak.textContent = stats.streak;
+    statSessions.textContent = stats.sessions;
+    statMinutes.textContent = Math.round(stats.totalSec / 60);
+    if (animate) { popEl(statStreak); popEl(statSessions); popEl(statMinutes); }
+  }
+
+  const dayStr = (ms) => new Date(ms).toISOString().slice(0, 10);
+  function commitSession() {
+    if (state.committed || state.roundCount < 1) return;
+    state.committed = true;
+    const cycle = settings.inhale + settings.holdTop + settings.exhale + settings.holdBot;
+    stats.sessions += 1;
+    stats.totalSec += state.roundCount * cycle;
+    const today = dayStr(Date.now());
+    if (stats.lastDay !== today) {
+      const yesterday = dayStr(Date.now() - 86400000);
+      stats.streak = (stats.lastDay === yesterday) ? stats.streak + 1 : 1;
+      stats.lastDay = today;
+    }
+    stats.best = Math.max(stats.best || 0, stats.streak);
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(stats)); } catch (e) {}
+    renderStats(true);
+  }
+
+  function buildPips() {
+    pips.innerHTML = "";
+    pips.dataset.mode = state.rounds > 0 ? "dots" : "count";
+    if (state.rounds > 0) {
+      const n = Math.min(state.rounds, 40);
+      for (let k = 0; k < n; k++) {
+        const p = document.createElement("span");
+        p.className = "pip";
+        pips.appendChild(p);
+      }
+    } else {
+      const c = document.createElement("span");
+      c.className = "count-pip";
+      c.textContent = "0 rounds";
+      pips.appendChild(c);
+    }
+  }
+  function fillPip(idx) {
+    if (pips.dataset.mode === "dots") {
+      const el = pips.children[idx];
+      if (el) { el.classList.add("filled"); popEl(el); }
+    } else {
+      const c = pips.firstChild;
+      if (c) { c.textContent = state.roundCount + (state.roundCount === 1 ? " round" : " rounds"); popEl(c); }
+    }
+  }
+
+  function burstFx(kind) { burst.classList.remove("ripple", "celebrate"); void burst.offsetWidth; burst.classList.add(kind); }
+  function haptic(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+  function rewardNote(freqs) {
+    if (!toneEnabled || !toneCtx) return;          // respect the silent default
+    freqs.forEach((f, i) => {
+      const t0 = toneCtx.currentTime + i * 0.12;
+      const osc = toneCtx.createOscillator(), g = toneCtx.createGain();
+      osc.type = "sine"; osc.frequency.value = f;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.1, t0 + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.4);
+      osc.connect(g).connect(toneCtx.destination);
+      osc.start(t0); osc.stop(t0 + 0.45);
+    });
+  }
+
+  // a small reward each time a full round lands
+  function onRoundDone() {
+    fillPip(state.roundCount - 1);
+    burstFx("ripple");
+    haptic(14);
+    rewardNote([659.25]); // E5 tick
+  }
+
+  const PRAISE = [
+    "Beautifully done.", "Calm earned.", "Nervous system: reset.",
+    "You showed up — that's the win.", "Steady. Centered. Good.", "That's the good stuff.",
+  ];
+  function celebrate() {
+    phaseWord.textContent = PRAISE[Math.floor(Math.random() * PRAISE.length)];
+    phaseCount.textContent = "✓";
+    roundLabel.textContent = stats.streak > 1 ? stats.streak + "-day streak 🔥" : "session complete";
+    announce.textContent = "Session complete. " + phaseWord.textContent;
+    burstFx("celebrate");
+    haptic([18, 60, 18, 60, 30]);
+    rewardNote([523.25, 659.25, 783.99]); // C–E–G major chord
   }
 
   startBtn.addEventListener("click", () => {
@@ -920,6 +1131,7 @@
   $("rounds").addEventListener("change", (e) => {
     state.rounds = parseInt(e.target.value, 10);
     updateRoundLabel();
+    if (!state.running) buildPips();
   });
 
   /* ============================================================
@@ -1208,6 +1420,8 @@
   ============================================================ */
   setBreath(0);
   applyPhaseVisual(0, true);
+  renderStats(false);
+  buildPips();
 
   // keep dot positioned correctly on resize
   let resizeRaf = null;
