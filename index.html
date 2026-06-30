@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Box Breathing — with live breath tracking</title>
+<!--
+  Box Breathing — single-file web app.
+  Open this file directly in a browser to run it. No build step, no dependencies.
+
+  NOTE: The microphone breath tracking uses getUserMedia, which only works in a
+  "secure context" — i.e. over https:// or on http://localhost / http://127.0.0.1.
+  Opening this file as a plain file:// URL will let the breathing guide run, but
+  the browser will block microphone access. The guided animation works either way.
+-->
+<style>
+  :root {
+    /* breath = 0 (fully exhaled / warm) -> 1 (fully inhaled / cool). Updated live by JS. */
+    --breath: 0;
+
+    /* Warm (exhaled) palette */
+    --warm-1: #2a1410;
+    --warm-2: #4a2018;
+    --warm-glow: #ff8a5c;
+
+    /* Cool (inhaled) palette */
+    --cool-1: #0c1626;
+    --cool-2: #102a3a;
+    --cool-glow: #6fd4e6;
+
+    --ink: #f3ece6;
+    --ink-dim: rgba(243, 236, 230, 0.6);
+    --ink-faint: rgba(243, 236, 230, 0.32);
+    --panel: rgba(255, 255, 255, 0.05);
+    --panel-line: rgba(255, 255, 255, 0.12);
+    --accent: #ffd9b0;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    /* Background shifts warm -> cool with the breath. */
+    background:
+      radial-gradient(120% 90% at 50% 12%,
+        color-mix(in oklab, var(--warm-2), var(--cool-2) calc(var(--breath) * 100%)) 0%,
+        color-mix(in oklab, var(--warm-1), var(--cool-1) calc(var(--breath) * 100%)) 70%);
+    background-attachment: fixed;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.4s ease;
+  }
+
+  /* subtle drifting atmosphere */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20% -20% -20% -20%;
+    background:
+      radial-gradient(40% 35% at 22% 30%, rgba(255, 170, 120, 0.10), transparent 60%),
+      radial-gradient(45% 40% at 80% 70%, rgba(110, 200, 230, 0.10), transparent 60%);
+    z-index: 0;
+    pointer-events: none;
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  @keyframes drift {
+    from { transform: translate3d(-2%, -1%, 0) scale(1.02); }
+    to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
+  }
+
+  header {
+    z-index: 1;
+    text-align: center;
+    margin: clamp(16px, 4vh, 36px) 16px 4px;
+  }
+  header h1 {
+    font-size: clamp(1.05rem, 3.4vw, 1.4rem);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0;
+    color: var(--accent);
+  }
+  header p {
+    margin: 6px 0 0;
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+    letter-spacing: 0.02em;
+  }
+
+  main {
+    z-index: 1;
+    width: 100%;
+    max-width: 520px;
+    padding: 8px 18px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  /* ---------- The breathing stage ---------- */
+  .stage {
+    position: relative;
+    width: min(78vw, 340px);
+    height: min(78vw, 340px);
+    margin: clamp(8px, 3vh, 24px) auto;
+  }
+
+  .square {
+    position: absolute;
+    inset: 0;
+    border: 2px solid var(--ink-faint);
+    border-radius: 22px;
+  }
+
+  /* travelling dot */
+  .dot {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 18px 4px color-mix(in oklab, var(--accent), transparent 30%);
+    left: 0; top: 0;
+    will-change: transform;
+  }
+
+  /* central orb */
+  .orb-wrap {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+  .orb {
+    width: 46%;
+    height: 46%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%,
+      color-mix(in oklab, var(--warm-glow), var(--cool-glow) calc(var(--breath) * 100%)),
+      color-mix(in oklab, #c9603a, #2e6f86 calc(var(--breath) * 100%)) 78%);
+    box-shadow:
+      0 0 60px 8px color-mix(in oklab, var(--warm-glow), var(--cool-glow) calc(var(--breath) * 100%));
+    transform: scale(var(--orb-scale, 0.55));
+    will-change: transform;
+    opacity: 0.95;
+  }
+
+  /* live breath ring (mic) — sits around the orb, pulses with detected level */
+  .breath-ring {
+    position: absolute;
+    width: 46%;
+    height: 46%;
+    border-radius: 50%;
+    border: 2px solid color-mix(in oklab, var(--cool-glow), white 10%);
+    transform: scale(var(--ring-scale, 0.55));
+    opacity: 0;
+    will-change: transform, opacity;
+    pointer-events: none;
+  }
+  .breath-ring.active { opacity: calc(0.25 + var(--ring-energy, 0) * 0.6); }
+
+  /* phase text overlay */
+  .phase {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    text-align: center;
+  }
+  .phase .word {
+    font-size: clamp(1.2rem, 5vw, 1.7rem);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-shadow: 0 2px 18px rgba(0,0,0,0.4);
+  }
+  .phase .count {
+    margin-top: 6px;
+    font-size: 0.95rem;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .phase .round {
+    position: absolute;
+    bottom: 14%;
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ---------- Controls ---------- */
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+  }
+  button, .btn {
+    font: inherit;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    padding: 11px 18px;
+    border-radius: 999px;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+    transition: background 0.18s ease, transform 0.08s ease, border-color 0.18s ease;
+  }
+  button:hover { background: rgba(255,255,255,0.10); }
+  button:active { transform: scale(0.97); }
+  button:focus-visible, [tabindex]:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button.primary {
+    background: color-mix(in oklab, var(--accent), transparent 0%);
+    color: #2a1408;
+    font-weight: 600;
+    border-color: transparent;
+    min-width: 120px;
+  }
+  button.primary:hover { background: color-mix(in oklab, var(--accent), white 12%); }
+  button[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent), transparent 80%);
+  }
+
+  /* ---------- Mic panel ---------- */
+  .mic-panel {
+    width: 100%;
+    border: 1px solid var(--panel-line);
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .mic-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .mic-head .label { font-weight: 600; letter-spacing: 0.02em; }
+  .mic-status {
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+    min-height: 1.1em;
+  }
+  .mic-status.error { color: #ff9b8a; }
+  .mic-status.live { color: var(--cool-glow); }
+
+  .meters { display: flex; flex-direction: column; gap: 10px; }
+  .meter-row { display: flex; align-items: center; gap: 10px; }
+  .meter-row .name {
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+    width: 92px;
+    flex: none;
+    letter-spacing: 0.04em;
+  }
+  .bar {
+    position: relative;
+    flex: 1;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+  }
+  .bar > i {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0%;
+    border-radius: 999px;
+    transition: width 0.06s linear;
+  }
+  .bar.level > i { background: linear-gradient(90deg, var(--warm-glow), var(--cool-glow)); }
+  .bar.sync  > i { background: linear-gradient(90deg, #ff7a7a, #8affc0); }
+  .bar .thresh {
+    position: absolute;
+    top: -2px; bottom: -2px;
+    width: 2px;
+    background: var(--ink-faint);
+  }
+  .mic-note {
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--ink-dim);
+  }
+
+  /* ---------- Settings ---------- */
+  details.settings {
+    width: 100%;
+    border: 1px solid var(--panel-line);
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 4px 16px;
+  }
+  details.settings > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 0;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  details.settings > summary::-webkit-details-marker { display: none; }
+  details.settings > summary::after { content: "⌄"; color: var(--ink-dim); transition: transform .2s; }
+  details.settings[open] > summary::after { transform: rotate(180deg); }
+  .setting {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 0;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .setting label { font-size: 0.88rem; }
+  .setting .val { font-variant-numeric: tabular-nums; color: var(--ink-dim); font-size: 0.85rem; min-width: 56px; text-align: right; }
+  .setting input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  .setting.inline { grid-template-columns: 1fr auto; }
+  .setting select, .setting input[type="number"] {
+    font: inherit;
+    color: var(--ink);
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+  .switch { display: inline-flex; align-items: center; gap: 8px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  footer {
+    z-index: 1;
+    color: var(--ink-faint);
+    font-size: 0.72rem;
+    text-align: center;
+    padding: 0 16px 28px;
+    max-width: 460px;
+    line-height: 1.5;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body::before { animation: none; }
+    .orb, .dot, .breath-ring { transition: none !important; }
+  }
+
+  @media (max-width: 380px) {
+    .meter-row .name { width: 72px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Box Breathing</h1>
+    <p>Inhale · hold · exhale · hold — four equal sides</p>
+  </header>
+
+  <main>
+    <div class="stage" id="stage">
+      <div class="square" aria-hidden="true"></div>
+
+      <div class="orb-wrap" aria-hidden="true">
+        <div class="breath-ring" id="breathRing"></div>
+        <div class="orb" id="orb"></div>
+      </div>
+
+      <div class="dot" id="dot" aria-hidden="true"></div>
+
+      <div class="phase">
+        <div class="word" id="phaseWord">ready</div>
+        <div class="count" id="phaseCount">—</div>
+        <div class="round" id="roundLabel"></div>
+      </div>
+    </div>
+
+    <!-- Live region announces phase changes for screen readers -->
+    <div class="sr-only" aria-live="polite" id="announce"></div>
+
+    <div class="controls">
+      <button class="primary" id="startBtn">Start</button>
+      <button id="resetBtn">Reset</button>
+      <button id="micBtn" aria-pressed="false">🎙 Mic off</button>
+      <button id="toneBtn" aria-pressed="false">🔔 Tone off</button>
+    </div>
+
+    <!-- ---------- Mic / breath tracking ---------- -->
+    <section class="mic-panel" id="micPanel" hidden aria-label="Live breath tracking">
+      <div class="mic-head">
+        <span class="label">Live breath</span>
+        <span class="mic-status" id="micStatus">Mic off</span>
+      </div>
+      <div class="meters">
+        <div class="meter-row">
+          <span class="name">Breath level</span>
+          <div class="bar level" role="meter" aria-label="Detected breath level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="levelMeter">
+            <span class="thresh" id="threshMark" style="left:0%"></span>
+            <i id="levelFill"></i>
+          </div>
+        </div>
+        <div class="meter-row">
+          <span class="name">Sync score</span>
+          <div class="bar sync" role="meter" aria-label="Breath sync score" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" id="syncMeter">
+            <i id="syncFill"></i>
+          </div>
+        </div>
+      </div>
+      <p class="mic-note">
+        Breathe audibly through your nose or mouth on the inhale and exhale, and stay quiet during the holds.
+        A single microphone can sense breath <em>activity vs. stillness</em> but can't reliably tell an inhale
+        from an exhale — both make similar turbulent noise. For true direction sensing you'd need a chest-strap
+        or dedicated breath sensor.
+      </p>
+    </section>
+
+    <!-- ---------- Settings ---------- -->
+    <details class="settings">
+      <summary>Settings</summary>
+
+      <div class="setting">
+        <label for="inhale">Inhale</label>
+        <span class="val" id="inhaleVal">4.0s</span>
+        <input type="range" id="inhale" min="1" max="12" step="0.5" value="4" />
+      </div>
+      <div class="setting">
+        <label for="hold1">Hold (full)</label>
+        <span class="val" id="hold1Val">4.0s</span>
+        <input type="range" id="hold1" min="0" max="12" step="0.5" value="4" />
+      </div>
+      <div class="setting">
+        <label for="exhale">Exhale</label>
+        <span class="val" id="exhaleVal">4.0s</span>
+        <input type="range" id="exhale" min="1" max="12" step="0.5" value="4" />
+      </div>
+      <div class="setting">
+        <label for="hold2">Hold (empty)</label>
+        <span class="val" id="hold2Val">4.0s</span>
+        <input type="range" id="hold2" min="0" max="12" step="0.5" value="4" />
+      </div>
+
+      <div class="setting inline">
+        <label for="rounds">Rounds</label>
+        <select id="rounds">
+          <option value="0">Unlimited</option>
+          <option value="3">3</option>
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="10">10</option>
+          <option value="15">15</option>
+          <option value="20">20</option>
+        </select>
+      </div>
+    </details>
+  </main>
+
+  <footer>
+    A calm four-count. The microphone option works only over <strong>https</strong> or
+    <strong>localhost</strong>, and nothing you breathe ever leaves this page — audio is analysed
+    locally and never recorded or sent anywhere.
+  </footer>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ============================================================
+     Helpers
+  ============================================================ */
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  // ease-in/out sine: smooth swell, 0->1
+  const easeInOutSine = (t) => 0.5 - 0.5 * Math.cos(Math.PI * clamp(t, 0, 1));
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ============================================================
+     Breathing state
+  ============================================================ */
+  // Phases in order: inhale, hold-full, exhale, hold-empty
+  const PHASES = [
+    { key: "inhale",  word: "breathe in", dur: 4, breathFrom: 0, breathTo: 1, active: true  },
+    { key: "holdTop", word: "hold",       dur: 4, breathFrom: 1, breathTo: 1, active: false },
+    { key: "exhale",  word: "breathe out",dur: 4, breathFrom: 1, breathTo: 0, active: true  },
+    { key: "holdBot", word: "hold",       dur: 4, breathFrom: 0, breathTo: 0, active: false },
+  ];
+  // `active` = user should be making breath sound during this phase.
+
+  const state = {
+    running: false,
+    phaseIndex: 0,
+    phaseStart: 0,        // performance.now() at phase start
+    rounds: 8,            // 0 = unlimited
+    roundCount: 0,
+    rafId: null,
+    breath: 0,            // 0..1 guided breath position (orb)
+  };
+
+  const settings = {
+    inhale: 4, holdTop: 4, exhale: 4, holdBot: 4,
+  };
+  const phaseKeyToSetting = { inhale: "inhale", holdTop: "holdTop", exhale: "exhale", holdBot: "holdBot" };
+
+  function phaseDuration(i) {
+    return settings[phaseKeyToSetting[PHASES[i].key]];
+  }
+
+  /* ============================================================
+     DOM refs
+  ============================================================ */
+  const stage = $("stage");
+  const orb = $("orb");
+  const dot = $("dot");
+  const breathRing = $("breathRing");
+  const phaseWord = $("phaseWord");
+  const phaseCount = $("phaseCount");
+  const roundLabel = $("roundLabel");
+  const announce = $("announce");
+  const startBtn = $("startBtn");
+  const resetBtn = $("resetBtn");
+
+  /* ============================================================
+     Dot path geometry
+     The dot travels one edge per phase, clockwise, starting bottom-left:
+       inhale   -> up the LEFT side    (bottom-left -> top-left)
+       holdTop  -> across the TOP      (top-left -> top-right)
+       exhale   -> down the RIGHT side (top-right -> bottom-right)
+       holdBot  -> across the BOTTOM   (bottom-right -> bottom-left)
+  ============================================================ */
+  function dotPosition(phaseIndex, t) {
+    const r = stage.getBoundingClientRect();
+    const w = r.width, h = r.height;
+    const pad = 0; // dot sits on the border (square has inset:0)
+    let x = 0, y = 0;
+    switch (phaseIndex) {
+      case 0: x = pad;     y = lerp(h - pad, pad, t); break;       // up left
+      case 1: x = lerp(pad, w - pad, t); y = pad; break;           // across top
+      case 2: x = w - pad; y = lerp(pad, h - pad, t); break;       // down right
+      case 3: x = lerp(w - pad, pad, t); y = h - pad; break;       // across bottom
+    }
+    return { x, y };
+  }
+
+  /* ============================================================
+     Render
+  ============================================================ */
+  function setBreath(v) {
+    state.breath = v;
+    document.documentElement.style.setProperty("--breath", v.toFixed(4));
+    // orb scale: 0.5 (empty) .. 1.0 (full)
+    const scale = lerp(0.5, 1.0, v);
+    orb.style.setProperty("--orb-scale", scale.toFixed(4));
+  }
+
+  function renderFrame(now) {
+    const i = state.phaseIndex;
+    const dur = phaseDuration(i);
+    const elapsed = (now - state.phaseStart) / 1000;
+    let t = dur > 0 ? clamp(elapsed / dur, 0, 1) : 1;
+
+    // advance phase?
+    if (elapsed >= dur) {
+      advancePhase(now);
+      return; // next frame renders the new phase
+    }
+
+    const ph = PHASES[i];
+
+    // Guided breath value via ease-in/out-sine between phase endpoints
+    const eased = easeInOutSine(t);
+    const breathVal = lerp(ph.breathFrom, ph.breathTo, eased);
+    setBreath(breathVal);
+
+    // Dot
+    const pos = dotPosition(i, t);
+    dot.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+
+    // Countdown
+    const remaining = Math.max(0, dur - elapsed);
+    phaseCount.textContent = dur > 0 ? Math.ceil(remaining).toString() : "";
+
+    // Mic ring (driven by analyser, see mic section)
+    updateBreathRing();
+    updateSync(ph.active, now);
+  }
+
+  function applyPhaseVisual(i, atStart) {
+    const ph = PHASES[i];
+    phaseWord.textContent = ph.word;
+    announce.textContent = ph.word + (phaseDuration(i) ? ", " + phaseDuration(i) + " seconds" : "");
+    // snap breath to phase start value to avoid jumps
+    if (atStart) setBreath(ph.breathFrom);
+    const pos = dotPosition(i, 0);
+    dot.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+  }
+
+  function updateRoundLabel() {
+    if (state.rounds === 0) {
+      roundLabel.textContent = state.running ? "round " + (state.roundCount + 1) : "";
+    } else {
+      roundLabel.textContent = "round " + Math.min(state.roundCount + 1, state.rounds) + " / " + state.rounds;
+    }
+  }
+
+  /* ============================================================
+     Phase machine
+  ============================================================ */
+  function advancePhase(now) {
+    let next = state.phaseIndex + 1;
+    if (next >= PHASES.length) {
+      next = 0;
+      state.roundCount++;
+      if (state.rounds !== 0 && state.roundCount >= state.rounds) {
+        finishSession();
+        return;
+      }
+    }
+    // skip zero-length holds gracefully
+    let guard = 0;
+    while (phaseDuration(next) <= 0 && guard < PHASES.length) {
+      // a hold set to 0 — skip but carry breath endpoint
+      next = (next + 1) % PHASES.length;
+      if (next === 0) {
+        state.roundCount++;
+        if (state.rounds !== 0 && state.roundCount >= state.rounds) { finishSession(); return; }
+      }
+      guard++;
+    }
+    state.phaseIndex = next;
+    state.phaseStart = now;
+    playTone(next);
+    applyPhaseVisual(next, true);
+    updateRoundLabel();
+  }
+
+  function loop(now) {
+    if (!state.running) return;
+    renderFrame(now);
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function startSession() {
+    if (state.running) return;
+    state.running = true;
+    state.phaseIndex = 0;
+    state.roundCount = 0;
+    state.phaseStart = performance.now();
+    applyPhaseVisual(0, true);
+    updateRoundLabel();
+    playTone(0);
+    startBtn.textContent = "Pause";
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function pauseSession() {
+    state.running = false;
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    startBtn.textContent = "Resume";
+    phaseWord.textContent = "paused";
+    announce.textContent = "paused";
+  }
+
+  function resumeSession() {
+    if (state.running) return;
+    state.running = true;
+    // resume current phase from where the dot is — restart phase clock fresh
+    state.phaseStart = performance.now();
+    applyPhaseVisual(state.phaseIndex, false);
+    startBtn.textContent = "Pause";
+    state.rafId = requestAnimationFrame(loop);
+  }
+
+  function finishSession() {
+    state.running = false;
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    startBtn.textContent = "Start";
+    phaseWord.textContent = "complete";
+    phaseCount.textContent = "✓";
+    roundLabel.textContent = state.rounds ? state.rounds + " rounds done" : "";
+    announce.textContent = "Session complete";
+  }
+
+  function resetSession() {
+    state.running = false;
+    if (state.rafId) cancelAnimationFrame(state.rafId);
+    state.phaseIndex = 0;
+    state.roundCount = 0;
+    setBreath(0);
+    applyPhaseVisual(0, true);
+    phaseWord.textContent = "ready";
+    phaseCount.textContent = "—";
+    roundLabel.textContent = "";
+    startBtn.textContent = "Start";
+    announce.textContent = "reset";
+  }
+
+  startBtn.addEventListener("click", () => {
+    // a user gesture — good place to resume audio context if present
+    resumeAudioContexts();
+    if (!state.running) {
+      if (startBtn.textContent === "Resume") resumeSession();
+      else startSession();
+    } else {
+      pauseSession();
+    }
+  });
+  resetBtn.addEventListener("click", resetSession);
+
+  /* ============================================================
+     Settings wiring
+  ============================================================ */
+  function bindSlider(id, key) {
+    const el = $(id);
+    const val = $(id + "Val");
+    const update = () => {
+      settings[key] = parseFloat(el.value);
+      val.textContent = settings[key].toFixed(1) + "s";
+    };
+    el.addEventListener("input", update);
+    update();
+  }
+  bindSlider("inhale", "inhale");
+  bindSlider("hold1", "holdTop");
+  bindSlider("exhale", "exhale");
+  bindSlider("hold2", "holdBot");
+
+  $("rounds").addEventListener("change", (e) => {
+    state.rounds = parseInt(e.target.value, 10);
+    updateRoundLabel();
+  });
+
+  /* ============================================================
+     Tone cue (optional, off by default) — WebAudio, no files
+  ============================================================ */
+  let toneEnabled = false;
+  let toneCtx = null;
+  const toneBtn = $("toneBtn");
+
+  toneBtn.addEventListener("click", () => {
+    toneEnabled = !toneEnabled;
+    toneBtn.setAttribute("aria-pressed", String(toneEnabled));
+    toneBtn.textContent = toneEnabled ? "🔔 Tone on" : "🔔 Tone off";
+    if (toneEnabled && !toneCtx) {
+      try { toneCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    if (toneCtx) toneCtx.resume();
+  });
+
+  // Distinct soft pitch per phase
+  const TONE_FREQ = { 0: 392.0, 1: 523.25, 2: 261.63, 3: 329.63 }; // G4, C5, C4, E4
+  function playTone(phaseIndex) {
+    if (!toneEnabled || !toneCtx) return;
+    const ctx = toneCtx;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = TONE_FREQ[phaseIndex] || 392;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(0.12, t0 + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.5);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.55);
+  }
+
+  function resumeAudioContexts() {
+    if (toneCtx && toneCtx.state === "suspended") toneCtx.resume();
+    if (mic.ctx && mic.ctx.state === "suspended") mic.ctx.resume();
+  }
+
+  /* ============================================================
+     Microphone breath tracking
+  ============================================================ */
+  const micBtn = $("micBtn");
+  const micPanel = $("micPanel");
+  const micStatus = $("micStatus");
+  const levelFill = $("levelFill");
+  const syncFill = $("syncFill");
+  const threshMark = $("threshMark");
+  const levelMeter = $("levelMeter");
+  const syncMeter = $("syncMeter");
+
+  const mic = {
+    on: false,
+    stream: null,
+    ctx: null,
+    source: null,
+    analyser: null,
+    buf: null,
+    rafId: null,
+    baseline: 0,        // ambient RMS floor
+    threshold: 0,       // detection threshold
+    ceiling: 0.06,      // breath RMS that maps to "1.0" (tuned, adjusts up)
+    level: 0,           // smoothed 0..1 breath level
+    rawAboveThresh: 0,  // smoothed activity 0..1 used for sync
+    sync: 0.5,          // 0..1 sync score
+    calibrating: false,
+  };
+
+  function setMicStatus(text, cls) {
+    micStatus.textContent = text;
+    micStatus.className = "mic-status" + (cls ? " " + cls : "");
+  }
+
+  micBtn.addEventListener("click", () => {
+    if (mic.on) stopMic();
+    else startMic();
+  });
+
+  async function startMic() {
+    // Secure-context check (https or localhost). file:// will fail here.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      micPanel.hidden = false;
+      setMicStatus("Microphone not available in this browser/context. Use https or localhost.", "error");
+      return;
+    }
+    micPanel.hidden = false;
+    setMicStatus("requesting microphone…");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,   // critical: keep breath sounds
+          autoGainControl: false,
+        },
+      });
+      mic.stream = stream;
+      mic.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (mic.ctx.state === "suspended") await mic.ctx.resume();
+      mic.source = mic.ctx.createMediaStreamSource(stream);
+      mic.analyser = mic.ctx.createAnalyser();
+      mic.analyser.fftSize = 1024;
+      mic.buf = new Float32Array(mic.analyser.fftSize);
+      mic.source.connect(mic.analyser);
+
+      mic.on = true;
+      micBtn.setAttribute("aria-pressed", "true");
+      micBtn.textContent = "🎙 Mic on";
+      breathRing.classList.add("active");
+
+      calibrate();              // ~1.5s ambient sampling
+      mic.rafId = requestAnimationFrame(micLoop);
+    } catch (err) {
+      let msg = "Microphone blocked.";
+      if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+        msg = "Microphone permission denied. Allow mic access (and use https or localhost), then try again.";
+      } else if (err && err.name === "NotFoundError") {
+        msg = "No microphone found on this device.";
+      } else if (err) {
+        msg = "Couldn't start microphone: " + err.name;
+      }
+      setMicStatus(msg, "error");
+      stopMic(true);
+    }
+  }
+
+  function stopMic(silent) {
+    mic.on = false;
+    if (mic.rafId) cancelAnimationFrame(mic.rafId);
+    mic.rafId = null;
+    if (mic.source) { try { mic.source.disconnect(); } catch(e){} }
+    if (mic.ctx)    { try { mic.ctx.close(); } catch(e){} }
+    if (mic.stream) { mic.stream.getTracks().forEach(t => t.stop()); } // release the mic
+    mic.stream = null; mic.ctx = null; mic.source = null; mic.analyser = null; mic.buf = null;
+    mic.level = 0; mic.rawAboveThresh = 0; mic.sync = 0.5;
+    micBtn.setAttribute("aria-pressed", "false");
+    micBtn.textContent = "🎙 Mic off";
+    breathRing.classList.remove("active");
+    breathRing.style.setProperty("--ring-scale", "0.5");
+    levelFill.style.width = "0%";
+    levelMeter.setAttribute("aria-valuenow", "0");
+    if (!silent) setMicStatus("Mic off");
+  }
+
+  function computeRMS() {
+    const a = mic.analyser, buf = mic.buf;
+    a.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = buf[i]; sum += v * v; }
+    return Math.sqrt(sum / buf.length);
+  }
+
+  function calibrate() {
+    mic.calibrating = true;
+    setMicStatus("calibrating… breathe normally", "live");
+    const samples = [];
+    const start = performance.now();
+    const DURATION = 1500; // ms
+    const tick = () => {
+      if (!mic.on) return;
+      samples.push(computeRMS());
+      if (performance.now() - start < DURATION) {
+        requestAnimationFrame(tick);
+      } else {
+        samples.sort((a, b) => a - b);
+        // median as robust ambient floor
+        const median = samples[Math.floor(samples.length / 2)] || 0;
+        const max = samples[samples.length - 1] || median;
+        mic.baseline = median;
+        mic.threshold = median + Math.max(0.0015, (max - median) * 0.6 + 0.002);
+        // ceiling = a realistic breath RMS above baseline; refined live
+        mic.ceiling = Math.max(0.02, mic.threshold * 4);
+        mic.calibrating = false;
+        setMicStatus("listening — breathe into the mic", "live");
+        // place threshold marker (relative to ceiling scale)
+        const tp = clamp((mic.threshold - mic.baseline) / (mic.ceiling - mic.baseline), 0, 1) * 100;
+        threshMark.style.left = tp.toFixed(1) + "%";
+      }
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function micLoop() {
+    if (!mic.on) return;
+    if (!mic.calibrating) {
+      const rms = computeRMS();
+
+      // adaptive ceiling: let loud breaths raise the ceiling slowly so meter stays usable
+      if (rms > mic.ceiling) mic.ceiling = lerp(mic.ceiling, rms, 0.05);
+
+      // normalise above baseline
+      const span = Math.max(1e-4, mic.ceiling - mic.baseline);
+      const target = clamp((rms - mic.baseline) / span, 0, 1);
+
+      // exponential moving average smoothing
+      mic.level = lerp(mic.level, target, 0.25);
+
+      // activity (above threshold) for sync, also smoothed
+      const above = rms > mic.threshold
+        ? clamp((rms - mic.threshold) / Math.max(1e-4, mic.ceiling - mic.threshold), 0, 1)
+        : 0;
+      mic.rawAboveThresh = lerp(mic.rawAboveThresh, above, 0.3);
+
+      // visuals
+      const pct = (mic.level * 100);
+      levelFill.style.width = pct.toFixed(1) + "%";
+      levelMeter.setAttribute("aria-valuenow", Math.round(pct));
+
+      updateBreathRing();
+    }
+    mic.rafId = requestAnimationFrame(micLoop);
+  }
+
+  function updateBreathRing() {
+    if (!mic.on) return;
+    // ring scales from orb size outward with breath energy
+    const energy = mic.level;
+    const scale = 0.5 + energy * 0.55;
+    breathRing.style.setProperty("--ring-scale", scale.toFixed(3));
+    breathRing.style.setProperty("--ring-energy", energy.toFixed(3));
+  }
+
+  /* ---- Breath-sync score ----
+     Reward: breathing ACTIVITY during active phases (inhale/exhale),
+             STILLNESS during holds.
+     Penalise: the opposite. Eased toward target, shown as a meter. */
+  function updateSync(phaseActive, now) {
+    if (!mic.on || mic.calibrating) return;
+    const activity = mic.rawAboveThresh;            // 0..1
+    // "Correctness" this instant:
+    //  active phase  -> want activity high  -> correct = activity
+    //  hold phase    -> want activity low   -> correct = 1 - activity
+    const correct = phaseActive ? activity : (1 - activity);
+    mic.sync = lerp(mic.sync, correct, 0.05);
+    const pct = mic.sync * 100;
+    syncFill.style.width = pct.toFixed(1) + "%";
+    syncMeter.setAttribute("aria-valuenow", Math.round(pct));
+  }
+
+  /* If mic is on but breathing session is paused, still keep the sync meter
+     reasonable by decaying toward neutral handled inside micLoop indirectly. */
+
+  /* ============================================================
+     Init
+  ============================================================ */
+  setBreath(0);
+  applyPhaseVisual(0, true);
+
+  // keep dot positioned correctly on resize
+  let resizeRaf = null;
+  window.addEventListener("resize", () => {
+    if (resizeRaf) cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(() => {
+      const pos = dotPosition(state.phaseIndex, 0);
+      // only snap when not running to avoid jump; running loop will fix next frame
+      if (!state.running) dot.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+    });
+  });
+
+  // Keyboard: space toggles start/pause when not focused on a control
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && !/input|select|button|summary|textarea/i.test(e.target.tagName)) {
+      e.preventDefault();
+      startBtn.click();
+    }
+  });
+
+  // Clean up mic if the page is hidden/closed
+  window.addEventListener("pagehide", () => { if (mic.on) stopMic(true); });
+})();
+</script>
+</body>
+</html>
