@@ -15,162 +15,254 @@
 -->
 <style>
   :root {
-    /* breath = 0 (fully exhaled / warm) -> 1 (fully inhaled / cool). Updated live by JS. */
+    /* breath = 0 (fully exhaled / warm) -> 1 (fully inhaled / cool). Live-updated by JS. */
     --breath: 0;
 
     /* Warm (exhaled) palette */
-    --warm-1: #2a1410;
-    --warm-2: #4a2018;
-    --warm-glow: #ff8a5c;
+    --warm-deep: #1c0f0d;
+    --warm-mid:  #4a2018;
+    --warm-glow: #ff9d6b;
+    --warm-lit:  #ffd9a8;
 
     /* Cool (inhaled) palette */
-    --cool-1: #0c1626;
-    --cool-2: #102a3a;
-    --cool-glow: #6fd4e6;
+    --cool-deep: #070f1c;
+    --cool-mid:  #103048;
+    --cool-glow: #74dbe9;
+    --cool-lit:  #cdf3ff;
 
-    --ink: #f3ece6;
-    --ink-dim: rgba(243, 236, 230, 0.6);
-    --ink-faint: rgba(243, 236, 230, 0.32);
-    --panel: rgba(255, 255, 255, 0.05);
-    --panel-line: rgba(255, 255, 255, 0.12);
-    --accent: #ffd9b0;
+    /* live-blended accents (warm -> cool with the breath) */
+    --glow: color-mix(in oklab, var(--warm-glow), var(--cool-glow) calc(var(--breath) * 100%));
+    --lit:  color-mix(in oklab, var(--warm-lit),  var(--cool-lit)  calc(var(--breath) * 100%));
+
+    --ink: #f6efe8;
+    --ink-dim: rgba(246, 239, 232, 0.62);
+    --ink-faint: rgba(246, 239, 232, 0.30);
+    --accent: #ffd2a6;
+
+    --glass: rgba(255, 255, 255, 0.055);
+    --glass-strong: rgba(255, 255, 255, 0.09);
+    --hairline: rgba(255, 255, 255, 0.14);
+    --radius: 20px;
+    --shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.85);
   }
 
   * { box-sizing: border-box; }
-
   html, body { height: 100%; margin: 0; }
 
   body {
     font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
     color: var(--ink);
-    /* Background shifts warm -> cool with the breath. */
-    background:
-      radial-gradient(120% 90% at 50% 12%,
-        color-mix(in oklab, var(--warm-2), var(--cool-2) calc(var(--breath) * 100%)) 0%,
-        color-mix(in oklab, var(--warm-1), var(--cool-1) calc(var(--breath) * 100%)) 70%);
-    background-attachment: fixed;
     min-height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
-    transition: background 0.4s ease;
+    position: relative;
+    /* deep base that breathes warm -> cool */
+    background:
+      radial-gradient(135% 105% at 50% -10%,
+        color-mix(in oklab, var(--warm-mid),  var(--cool-mid)  calc(var(--breath) * 100%)) 0%,
+        color-mix(in oklab, var(--warm-deep), var(--cool-deep) calc(var(--breath) * 100%)) 62%);
+    background-attachment: fixed;
+    transition: background 0.6s ease;
   }
 
-  /* subtle drifting atmosphere */
+  /* drifting aurora light */
   body::before {
     content: "";
     position: fixed;
-    inset: -20% -20% -20% -20%;
-    background:
-      radial-gradient(40% 35% at 22% 30%, rgba(255, 170, 120, 0.10), transparent 60%),
-      radial-gradient(45% 40% at 80% 70%, rgba(110, 200, 230, 0.10), transparent 60%);
+    inset: -30%;
     z-index: 0;
     pointer-events: none;
-    animation: drift 26s ease-in-out infinite alternate;
+    background:
+      radial-gradient(32% 28% at 22% 26%, color-mix(in oklab, var(--warm-glow), transparent 78%), transparent 62%),
+      radial-gradient(36% 32% at 80% 30%, color-mix(in oklab, var(--cool-glow), transparent 80%), transparent 62%),
+      radial-gradient(40% 36% at 60% 84%, color-mix(in oklab, var(--lit), transparent 86%), transparent 64%);
+    filter: blur(14px) saturate(1.1);
+    animation: aurora 32s ease-in-out infinite alternate;
   }
-  @keyframes drift {
-    from { transform: translate3d(-2%, -1%, 0) scale(1.02); }
-    to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
+  @keyframes aurora {
+    0%   { transform: translate3d(-3%, -2%, 0) scale(1.05) rotate(0deg); }
+    50%  { transform: translate3d(2%, 1%, 0)  scale(1.12) rotate(4deg); }
+    100% { transform: translate3d(4%, 3%, 0)  scale(1.08) rotate(-3deg); }
   }
 
+  /* fine film grain for a premium, non-flat surface */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  header, main, footer { position: relative; z-index: 1; width: 100%; }
+
   header {
-    z-index: 1;
     text-align: center;
-    margin: clamp(16px, 4vh, 36px) 16px 4px;
+    margin: clamp(22px, 5vh, 48px) 16px 2px;
   }
   header h1 {
-    font-size: clamp(1.05rem, 3.4vw, 1.4rem);
+    font-size: clamp(0.92rem, 3vw, 1.18rem);
     font-weight: 600;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
     text-transform: uppercase;
     margin: 0;
-    color: var(--accent);
+    background: linear-gradient(180deg, var(--lit), var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 1px 10px color-mix(in oklab, var(--glow), transparent 55%));
   }
   header p {
-    margin: 6px 0 0;
-    font-size: 0.8rem;
+    margin: 10px 0 0;
+    font-size: 0.78rem;
     color: var(--ink-dim);
-    letter-spacing: 0.02em;
+    letter-spacing: 0.06em;
   }
 
   main {
-    z-index: 1;
-    width: 100%;
-    max-width: 520px;
-    padding: 8px 18px 40px;
+    max-width: 540px;
+    padding: 8px 20px 48px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 18px;
+    margin: 0 auto;
   }
 
-  /* ---------- The breathing stage ---------- */
+  /* ---------- Breathing stage ---------- */
   .stage {
     position: relative;
-    width: min(78vw, 340px);
-    height: min(78vw, 340px);
-    margin: clamp(8px, 3vh, 24px) auto;
+    width: min(80vw, 360px);
+    height: min(80vw, 360px);
+    margin: clamp(14px, 4vh, 34px) auto clamp(6px, 2vh, 18px);
   }
+
+  /* soft halo rotating behind everything */
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: -14%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg,
+      color-mix(in oklab, var(--glow), transparent 80%),
+      transparent 30%, transparent 70%,
+      color-mix(in oklab, var(--lit), transparent 84%));
+    filter: blur(28px);
+    opacity: 0.7;
+    animation: spin 26s linear infinite;
+    z-index: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .square {
     position: absolute;
     inset: 0;
-    border: 2px solid var(--ink-faint);
-    border-radius: 22px;
+    border-radius: 28px;
+    z-index: 1;
+    /* gradient hairline border via mask */
+    padding: 1.5px;
+    background: linear-gradient(145deg,
+      color-mix(in oklab, var(--lit), transparent 55%),
+      color-mix(in oklab, var(--ink-faint), transparent 30%) 45%,
+      color-mix(in oklab, var(--glow), transparent 60%));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+    box-shadow:
+      inset 0 0 40px color-mix(in oklab, var(--glow), transparent 86%),
+      0 0 50px -20px color-mix(in oklab, var(--glow), transparent 40%);
   }
 
-  /* travelling dot */
+  /* travelling comet dot */
   .dot {
     position: absolute;
-    width: 18px;
-    height: 18px;
-    margin: -9px 0 0 -9px;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 18px 4px color-mix(in oklab, var(--accent), transparent 30%);
     left: 0; top: 0;
+    z-index: 4;
+    background: radial-gradient(circle at 38% 34%, #fff, var(--lit) 45%, var(--glow) 100%);
+    box-shadow:
+      0 0 10px 2px var(--lit),
+      0 0 26px 8px color-mix(in oklab, var(--glow), transparent 30%),
+      0 0 50px 16px color-mix(in oklab, var(--glow), transparent 62%);
     will-change: transform;
   }
 
-  /* central orb */
   .orb-wrap {
     position: absolute;
     inset: 0;
     display: grid;
     place-items: center;
     pointer-events: none;
-  }
-  .orb {
-    width: 46%;
-    height: 46%;
-    border-radius: 50%;
-    background: radial-gradient(circle at 38% 34%,
-      color-mix(in oklab, var(--warm-glow), var(--cool-glow) calc(var(--breath) * 100%)),
-      color-mix(in oklab, #c9603a, #2e6f86 calc(var(--breath) * 100%)) 78%);
-    box-shadow:
-      0 0 60px 8px color-mix(in oklab, var(--warm-glow), var(--cool-glow) calc(var(--breath) * 100%));
-    transform: scale(var(--orb-scale, 0.55));
-    will-change: transform;
-    opacity: 0.95;
+    z-index: 2;
   }
 
-  /* live breath ring (mic) — sits around the orb, pulses with detected level */
+  /* luminous glass orb */
+  .orb {
+    position: relative;
+    width: 50%;
+    height: 50%;
+    border-radius: 50%;
+    transform: scale(var(--orb-scale, 0.55));
+    will-change: transform;
+    background:
+      radial-gradient(circle at 36% 30%,
+        color-mix(in oklab, #ffffff, var(--lit) 30%) 0%,
+        var(--glow) 32%,
+        color-mix(in oklab, var(--glow), #000 55%) 78%,
+        color-mix(in oklab, var(--glow), #000 72%) 100%);
+    box-shadow:
+      0 0 70px 6px color-mix(in oklab, var(--glow), transparent 42%),
+      0 0 140px 18px color-mix(in oklab, var(--glow), transparent 66%),
+      inset 0 -18px 40px color-mix(in oklab, #000, transparent 60%),
+      inset 0 14px 30px color-mix(in oklab, #fff, transparent 70%);
+  }
+  /* specular highlight */
+  .orb::before {
+    content: "";
+    position: absolute;
+    top: 12%; left: 18%;
+    width: 40%; height: 32%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9), transparent 70%);
+    filter: blur(3px);
+    opacity: 0.75;
+  }
+  /* thin rim light */
+  .orb::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--lit), transparent 55%);
+  }
+
+  /* live breath ring (mic) */
   .breath-ring {
     position: absolute;
-    width: 46%;
-    height: 46%;
+    width: 50%;
+    height: 50%;
     border-radius: 50%;
-    border: 2px solid color-mix(in oklab, var(--cool-glow), white 10%);
+    border: 2px solid color-mix(in oklab, var(--lit), white 8%);
+    box-shadow: 0 0 22px color-mix(in oklab, var(--glow), transparent 40%);
     transform: scale(var(--ring-scale, 0.55));
     opacity: 0;
     will-change: transform, opacity;
-    pointer-events: none;
+    z-index: 3;
   }
-  .breath-ring.active { opacity: calc(0.25 + var(--ring-energy, 0) * 0.6); }
+  .breath-ring.active { opacity: calc(0.22 + var(--ring-energy, 0) * 0.62); }
 
-  /* phase text overlay */
+  /* phase text */
   .phase {
     position: absolute;
     inset: 0;
@@ -180,24 +272,28 @@
     justify-content: center;
     pointer-events: none;
     text-align: center;
+    z-index: 5;
   }
   .phase .word {
-    font-size: clamp(1.2rem, 5vw, 1.7rem);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-shadow: 0 2px 18px rgba(0,0,0,0.4);
+    font-size: clamp(1.25rem, 5.4vw, 1.8rem);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--lit);
+    text-shadow: 0 2px 26px color-mix(in oklab, var(--glow), transparent 30%), 0 1px 2px rgba(0,0,0,0.5);
   }
   .phase .count {
-    margin-top: 6px;
-    font-size: 0.95rem;
+    margin-top: 8px;
+    font-size: 1.05rem;
+    font-weight: 300;
     color: var(--ink-dim);
     font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
   }
   .phase .round {
     position: absolute;
-    bottom: 14%;
-    font-size: 0.72rem;
-    letter-spacing: 0.16em;
+    bottom: 12%;
+    font-size: 0.66rem;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--ink-faint);
   }
@@ -210,78 +306,90 @@
     justify-content: center;
     width: 100%;
   }
-  button, .btn {
+  button {
     font: inherit;
+    font-size: 0.86rem;
     color: var(--ink);
-    background: var(--panel);
-    border: 1px solid var(--panel-line);
+    background: var(--glass);
+    border: 1px solid var(--hairline);
     padding: 11px 18px;
     border-radius: 999px;
     cursor: pointer;
-    letter-spacing: 0.02em;
-    transition: background 0.18s ease, transform 0.08s ease, border-color 0.18s ease;
+    letter-spacing: 0.01em;
+    backdrop-filter: blur(12px) saturate(1.2);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 20px -14px rgba(0,0,0,0.8);
+    transition: background 0.2s ease, transform 0.08s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  button:hover { background: rgba(255,255,255,0.10); }
-  button:active { transform: scale(0.97); }
+  button:hover { background: var(--glass-strong); border-color: rgba(255,255,255,0.22); transform: translateY(-1px); }
+  button:active { transform: translateY(0) scale(0.97); }
   button:focus-visible, [tabindex]:focus-visible, summary:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline-offset: 3px;
   }
   button.primary {
-    background: color-mix(in oklab, var(--accent), transparent 0%);
     color: #2a1408;
-    font-weight: 600;
-    border-color: transparent;
-    min-width: 120px;
+    font-weight: 700;
+    border: none;
+    min-width: 128px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent), white 16%), var(--accent));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.55),
+      0 10px 26px -12px color-mix(in oklab, var(--accent), transparent 30%),
+      0 0 0 1px rgba(255,255,255,0.06);
   }
-  button.primary:hover { background: color-mix(in oklab, var(--accent), white 12%); }
+  button.primary:hover { filter: brightness(1.05); transform: translateY(-1px); }
   button[aria-pressed="true"] {
-    border-color: var(--accent);
-    background: color-mix(in oklab, var(--accent), transparent 80%);
+    border-color: color-mix(in oklab, var(--accent), transparent 30%);
+    background: color-mix(in oklab, var(--accent), transparent 78%);
+    color: var(--lit);
+    box-shadow: inset 0 0 18px color-mix(in oklab, var(--glow), transparent 70%), 0 0 0 1px color-mix(in oklab, var(--accent), transparent 60%);
   }
 
-  /* ---------- Mic panel ---------- */
-  .mic-panel {
+  /* ---------- Glass panels ---------- */
+  .mic-panel, details.settings {
     width: 100%;
-    border: 1px solid var(--panel-line);
-    background: var(--panel);
-    border-radius: 16px;
-    padding: 14px 16px;
+    border: 1px solid var(--hairline);
+    background: var(--glass);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+
+  .mic-panel {
+    padding: 16px 18px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
   }
-  .mic-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  .mic-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mic-head .label { font-weight: 600; letter-spacing: 0.04em; }
+  .mic-head .label::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--glow);
+    box-shadow: 0 0 10px var(--glow);
+    vertical-align: middle;
   }
-  .mic-head .label { font-weight: 600; letter-spacing: 0.02em; }
-  .mic-status {
-    font-size: 0.78rem;
-    color: var(--ink-dim);
-    min-height: 1.1em;
-  }
+  .mic-status { font-size: 0.76rem; color: var(--ink-dim); min-height: 1.1em; text-align: right; }
   .mic-status.error { color: #ff9b8a; }
-  .mic-status.live { color: var(--cool-glow); }
+  .mic-status.live { color: var(--cool-lit); }
 
-  .meters { display: flex; flex-direction: column; gap: 10px; }
-  .meter-row { display: flex; align-items: center; gap: 10px; }
-  .meter-row .name {
-    font-size: 0.72rem;
-    color: var(--ink-dim);
-    width: 92px;
-    flex: none;
-    letter-spacing: 0.04em;
-  }
+  .meters { display: flex; flex-direction: column; gap: 12px; }
+  .meter-row { display: flex; align-items: center; gap: 12px; }
+  .meter-row .name { font-size: 0.7rem; color: var(--ink-dim); width: 96px; flex: none; letter-spacing: 0.05em; text-transform: uppercase; }
   .bar {
     position: relative;
     flex: 1;
-    height: 10px;
+    height: 12px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.08);
+    background: rgba(0,0,0,0.28);
     overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05);
   }
   .bar > i {
     position: absolute;
@@ -289,62 +397,81 @@
     width: 0%;
     border-radius: 999px;
     transition: width 0.06s linear;
+    box-shadow: 0 0 12px color-mix(in oklab, var(--glow), transparent 40%);
   }
   .bar.level > i { background: linear-gradient(90deg, var(--warm-glow), var(--cool-glow)); }
-  .bar.sync  > i { background: linear-gradient(90deg, #ff7a7a, #8affc0); }
-  .bar .thresh {
-    position: absolute;
-    top: -2px; bottom: -2px;
-    width: 2px;
-    background: var(--ink-faint);
-  }
-  .mic-note {
-    font-size: 0.74rem;
-    line-height: 1.45;
-    color: var(--ink-dim);
-  }
+  .bar.sync  > i { background: linear-gradient(90deg, #ff8a8a, #8affc0); }
+  .bar .thresh { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-faint); z-index: 2; }
+  .mic-note { font-size: 0.72rem; line-height: 1.55; color: var(--ink-dim); }
+  .mic-note em { color: var(--ink); font-style: normal; border-bottom: 1px dotted var(--ink-faint); }
 
   /* ---------- Settings ---------- */
-  details.settings {
-    width: 100%;
-    border: 1px solid var(--panel-line);
-    background: var(--panel);
-    border-radius: 16px;
-    padding: 4px 16px;
-  }
+  details.settings { padding: 2px 18px; }
   details.settings > summary {
     cursor: pointer;
     list-style: none;
-    padding: 12px 0;
+    padding: 15px 0;
     font-weight: 600;
+    letter-spacing: 0.03em;
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
   details.settings > summary::-webkit-details-marker { display: none; }
-  details.settings > summary::after { content: "⌄"; color: var(--ink-dim); transition: transform .2s; }
+  details.settings > summary::after { content: "⌄"; color: var(--ink-dim); transition: transform .25s; font-size: 1.1em; }
   details.settings[open] > summary::after { transform: rotate(180deg); }
   .setting {
     display: grid;
     grid-template-columns: 1fr auto;
     align-items: center;
     gap: 8px 12px;
-    padding: 10px 0;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 13px 0;
+    border-top: 1px solid rgba(255,255,255,0.07);
   }
-  .setting label { font-size: 0.88rem; }
-  .setting .val { font-variant-numeric: tabular-nums; color: var(--ink-dim); font-size: 0.85rem; min-width: 56px; text-align: right; }
-  .setting input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  .setting label { font-size: 0.9rem; }
+  .setting .val { font-variant-numeric: tabular-nums; color: var(--lit); font-size: 0.85rem; min-width: 56px; text-align: right; }
+
+  /* custom range */
+  .setting input[type="range"] {
+    grid-column: 1 / -1;
+    width: 100%;
+    height: 22px;
+    margin: 2px 0 0;
+    background: transparent;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+  }
+  .setting input[type="range"]::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 999px;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--glow), transparent 40%), rgba(255,255,255,0.12));
+  }
+  .setting input[type="range"]::-moz-range-track {
+    height: 5px; border-radius: 999px; background: rgba(255,255,255,0.14);
+  }
+  .setting input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 17px; height: 17px; margin-top: -6px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #fff, var(--accent) 70%);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent), transparent 80%), 0 2px 6px rgba(0,0,0,0.5);
+  }
+  .setting input[type="range"]::-moz-range-thumb {
+    width: 17px; height: 17px; border: none; border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #fff, var(--accent) 70%);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent), transparent 80%);
+  }
+
   .setting.inline { grid-template-columns: 1fr auto; }
-  .setting select, .setting input[type="number"] {
-    font: inherit;
+  .setting select {
+    font: inherit; font-size: 0.88rem;
     color: var(--ink);
-    background: rgba(0,0,0,0.25);
-    border: 1px solid var(--panel-line);
-    border-radius: 8px;
-    padding: 6px 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 8px 12px;
   }
-  .switch { display: inline-flex; align-items: center; gap: 8px; }
+  .setting select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .sr-only {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -352,22 +479,24 @@
   }
 
   footer {
-    z-index: 1;
     color: var(--ink-faint);
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     text-align: center;
-    padding: 0 16px 28px;
-    max-width: 460px;
-    line-height: 1.5;
+    padding: 4px 20px 34px;
+    max-width: 480px;
+    line-height: 1.6;
+    margin: 0 auto;
   }
+  footer strong { color: var(--ink-dim); font-weight: 600; }
 
   @media (prefers-reduced-motion: reduce) {
-    body::before { animation: none; }
+    body::before, .stage::before { animation: none; }
     .orb, .dot, .breath-ring { transition: none !important; }
   }
 
-  @media (max-width: 380px) {
-    .meter-row .name { width: 72px; }
+  @media (max-width: 400px) {
+    .meter-row .name { width: 74px; }
+    button { padding: 10px 15px; font-size: 0.82rem; }
   }
 </style>
 </head>
