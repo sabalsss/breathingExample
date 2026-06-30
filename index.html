@@ -428,9 +428,11 @@
       </div>
       <p class="mic-note">
         Breathe audibly through your nose or mouth on the inhale and exhale, and stay quiet during the holds.
-        A single microphone can sense breath <em>activity vs. stillness</em> but can't reliably tell an inhale
-        from an exhale — both make similar turbulent noise. For true direction sensing you'd need a chest-strap
-        or dedicated breath sensor.
+        The detector listens for the broadband, noise-like sound of breath, so steady tones — humming, music,
+        a fan's pitch, vowels — are largely ignored. Two honest limits remain: hissy speech sounds
+        (s, f, sh, th) are physically the same turbulent noise as breath and will still register, and a single
+        mic can sense breath <em>activity vs. stillness</em> but can't reliably tell an inhale from an exhale.
+        For true direction sensing you'd need a chest-strap or dedicated breath sensor.
       </p>
     </section>
 
@@ -808,15 +810,22 @@
     ctx: null,
     source: null,
     analyser: null,
-    buf: null,
+    buf: null,          // time-domain buffer (unused by detector, kept for fallback)
+    freq: null,         // frequency-domain buffer (dB per bin)
     rafId: null,
-    baseline: 0,        // ambient RMS floor
+    baseline: 0,        // ambient breath-signal floor
     threshold: 0,       // detection threshold
-    ceiling: 0.06,      // breath RMS that maps to "1.0" (tuned, adjusts up)
+    ceiling: 0.06,      // breath signal that maps to "1.0" (adjusts up live)
     level: 0,           // smoothed 0..1 breath level
     rawAboveThresh: 0,  // smoothed activity 0..1 used for sync
     sync: 0.5,          // 0..1 sync score
     calibrating: false,
+    flatness: 0,        // last spectral flatness (0 tonal .. 1 noise-like)
+    // --- Breath-detection tuning (heuristic; safe to adjust) ---
+    bandLowHz: 250,     // breath turbulence energy lives roughly in this band
+    bandHighHz: 3500,
+    flatnessFloor: 0.10, // below this = clearly tonal -> ignored as "not breath"
+    flatnessFull: 0.32,  // at/above this = clearly noise-like -> full breath weight
   };
 
   function setMicStatus(text, cls) {
@@ -851,8 +860,10 @@
       if (mic.ctx.state === "suspended") await mic.ctx.resume();
       mic.source = mic.ctx.createMediaStreamSource(stream);
       mic.analyser = mic.ctx.createAnalyser();
-      mic.analyser.fftSize = 1024;
+      mic.analyser.fftSize = 2048;          // ~23 Hz bins @48k — enough to shape the breath band
+      mic.analyser.smoothingTimeConstant = 0.5;
       mic.buf = new Float32Array(mic.analyser.fftSize);
+      mic.freq = new Float32Array(mic.analyser.frequencyBinCount); // dB per bin
       mic.source.connect(mic.analyser);
 
       mic.on = true;
@@ -883,7 +894,7 @@
     if (mic.source) { try { mic.source.disconnect(); } catch(e){} }
     if (mic.ctx)    { try { mic.ctx.close(); } catch(e){} }
     if (mic.stream) { mic.stream.getTracks().forEach(t => t.stop()); } // release the mic
-    mic.stream = null; mic.ctx = null; mic.source = null; mic.analyser = null; mic.buf = null;
+    mic.stream = null; mic.ctx = null; mic.source = null; mic.analyser = null; mic.buf = null; mic.freq = null;
     mic.level = 0; mic.rawAboveThresh = 0; mic.sync = 0.5;
     micBtn.setAttribute("aria-pressed", "false");
     micBtn.textContent = "🎙 Mic off";
@@ -894,12 +905,42 @@
     if (!silent) setMicStatus("Mic off");
   }
 
-  function computeRMS() {
-    const a = mic.analyser, buf = mic.buf;
-    a.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) { const v = buf[i]; sum += v * v; }
-    return Math.sqrt(sum / buf.length);
+  /* Breath-specific feature.
+     Instead of overall loudness, we measure energy *inside the breath band*
+     and weight it by how *noise-like* the sound is (spectral flatness).
+
+       - Spectral flatness = geometric mean / arithmetic mean of the band's
+         magnitudes. ~1 for flat broadband noise (breath, wind, "shhh"),
+         ~0 for tonal sound (hum, vowel, music, whistle, steady fan pitch).
+       - We gate the in-band energy by that flatness, so a loud hum reads near
+         zero while a soft breath reads strong.
+
+     Limitation: fricative consonants (s, f, sh, th) are physically the same
+     turbulent noise as breath, so speech containing them still registers. */
+  function computeBreathSignal() {
+    const a = mic.analyser, freq = mic.freq;
+    a.getFloatFrequencyData(freq);                 // dB per bin (negative-ish)
+    const binHz = mic.ctx.sampleRate / a.fftSize;
+    const lo = Math.max(1, Math.floor(mic.bandLowHz / binHz));
+    const hi = Math.min(freq.length - 1, Math.ceil(mic.bandHighHz / binHz));
+    let sumMag = 0, sumLogMag = 0, sumPow = 0, n = 0;
+    for (let i = lo; i <= hi; i++) {
+      let mag = Math.pow(10, freq[i] / 20);        // dB -> linear magnitude
+      if (!isFinite(mag) || mag < 1e-7) mag = 1e-7;
+      sumMag += mag;
+      sumLogMag += Math.log(mag);
+      sumPow += mag * mag;
+      n++;
+    }
+    if (n === 0) { mic.flatness = 0; return 0; }
+    const arithMean = sumMag / n;
+    const geoMean = Math.exp(sumLogMag / n);
+    const flatness = clamp(geoMean / (arithMean + 1e-12), 0, 1); // 0 tonal .. 1 noise
+    const bandRMS = Math.sqrt(sumPow / n);
+    mic.flatness = flatness;
+    // weight in-band energy by noise-likeness
+    const gate = clamp((flatness - mic.flatnessFloor) / (mic.flatnessFull - mic.flatnessFloor), 0, 1);
+    return bandRMS * gate;
   }
 
   function calibrate() {
@@ -910,7 +951,7 @@
     const DURATION = 1500; // ms
     const tick = () => {
       if (!mic.on) return;
-      samples.push(computeRMS());
+      samples.push(computeBreathSignal());
       if (performance.now() - start < DURATION) {
         requestAnimationFrame(tick);
       } else {
@@ -935,21 +976,21 @@
   function micLoop() {
     if (!mic.on) return;
     if (!mic.calibrating) {
-      const rms = computeRMS();
+      const sig = computeBreathSignal();   // band-limited, flatness-gated breath energy
 
       // adaptive ceiling: let loud breaths raise the ceiling slowly so meter stays usable
-      if (rms > mic.ceiling) mic.ceiling = lerp(mic.ceiling, rms, 0.05);
+      if (sig > mic.ceiling) mic.ceiling = lerp(mic.ceiling, sig, 0.05);
 
       // normalise above baseline
       const span = Math.max(1e-4, mic.ceiling - mic.baseline);
-      const target = clamp((rms - mic.baseline) / span, 0, 1);
+      const target = clamp((sig - mic.baseline) / span, 0, 1);
 
       // exponential moving average smoothing
       mic.level = lerp(mic.level, target, 0.25);
 
       // activity (above threshold) for sync, also smoothed
-      const above = rms > mic.threshold
-        ? clamp((rms - mic.threshold) / Math.max(1e-4, mic.ceiling - mic.threshold), 0, 1)
+      const above = sig > mic.threshold
+        ? clamp((sig - mic.threshold) / Math.max(1e-4, mic.ceiling - mic.threshold), 0, 1)
         : 0;
       mic.rawAboveThresh = lerp(mic.rawAboveThresh, above, 0.3);
 
