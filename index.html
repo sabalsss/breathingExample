@@ -402,6 +402,7 @@
       <button class="primary" id="startBtn">Start</button>
       <button id="resetBtn">Reset</button>
       <button id="micBtn" aria-pressed="false">🎙 Mic off</button>
+      <button id="followBtn" aria-pressed="false" title="Let your real breathing drive the dot (needs mic)">🌬 Follow breath: off</button>
       <button id="toneBtn" aria-pressed="false">🔔 Tone off</button>
     </div>
 
@@ -513,10 +514,13 @@
     running: false,
     phaseIndex: 0,
     phaseStart: 0,        // performance.now() at phase start
+    phaseProgress: 0,     // 0..1 progress through current phase (accumulated per frame)
+    lastFrame: 0,         // performance.now() of previous frame (for dt)
     rounds: 8,            // 0 = unlimited
     roundCount: 0,
     rafId: null,
     breath: 0,            // 0..1 guided breath position (orb)
+    breathPaced: false,   // when true + mic on, real breath drives dot progression
   };
 
   const settings = {
@@ -578,16 +582,38 @@
   function renderFrame(now) {
     const i = state.phaseIndex;
     const dur = phaseDuration(i);
-    const elapsed = (now - state.phaseStart) / 1000;
-    let t = dur > 0 ? clamp(elapsed / dur, 0, 1) : 1;
+    const ph = PHASES[i];
+
+    // frame delta (clamped so a backgrounded tab can't jump the dot)
+    let dt = (now - state.lastFrame) / 1000;
+    if (!isFinite(dt) || dt < 0) dt = 0;
+    dt = Math.min(dt, 0.1);
+    state.lastFrame = now;
+
+    // How fast does the dot continue this frame?
+    //  - normal mode: fixed clock, factor = 1
+    //  - breath-paced mode (mic on): the dot advances in REAL TIME with your
+    //    breath — it moves while you're breathing during inhale/exhale, and
+    //    while you're quiet during the holds; it slows when you don't match.
+    let factor = 1;
+    const paced = state.breathPaced && mic.on && !mic.calibrating;
+    if (paced) {
+      const activity = mic.rawAboveThresh;                 // 0..1 live breath energy
+      const match = ph.active ? activity : (1 - activity); // breathe vs. be still
+      // never fully stall (floor) and allow a gentle hurry when you breathe hard
+      factor = clamp(0.25 + 1.25 * match, 0.25, 1.45);
+    }
+
+    // accumulate progress 0..1 through the phase
+    if (dur > 0) state.phaseProgress += (dt / dur) * factor;
+    else state.phaseProgress = 1;
+    let t = clamp(state.phaseProgress, 0, 1);
 
     // advance phase?
-    if (elapsed >= dur) {
+    if (state.phaseProgress >= 1) {
       advancePhase(now);
       return; // next frame renders the new phase
     }
-
-    const ph = PHASES[i];
 
     // Guided breath value via ease-in/out-sine between phase endpoints
     const eased = easeInOutSine(t);
@@ -598,8 +624,8 @@
     const pos = dotPosition(i, t);
     dot.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
 
-    // Countdown
-    const remaining = Math.max(0, dur - elapsed);
+    // Countdown (approximate when breath-paced, since pace varies)
+    const remaining = Math.max(0, dur * (1 - t));
     phaseCount.textContent = dur > 0 ? Math.ceil(remaining).toString() : "";
 
     // Mic ring (driven by analyser, see mic section)
@@ -651,6 +677,8 @@
     }
     state.phaseIndex = next;
     state.phaseStart = now;
+    state.phaseProgress = 0;
+    state.lastFrame = now;
     playTone(next);
     applyPhaseVisual(next, true);
     updateRoundLabel();
@@ -668,6 +696,8 @@
     state.phaseIndex = 0;
     state.roundCount = 0;
     state.phaseStart = performance.now();
+    state.phaseProgress = 0;
+    state.lastFrame = performance.now();
     applyPhaseVisual(0, true);
     updateRoundLabel();
     playTone(0);
@@ -686,8 +716,9 @@
   function resumeSession() {
     if (state.running) return;
     state.running = true;
-    // resume current phase from where the dot is — restart phase clock fresh
+    // continue current phase from where it was; just avoid a dt jump
     state.phaseStart = performance.now();
+    state.lastFrame = performance.now();
     applyPhaseVisual(state.phaseIndex, false);
     startBtn.textContent = "Pause";
     state.rafId = requestAnimationFrame(loop);
@@ -708,6 +739,7 @@
     if (state.rafId) cancelAnimationFrame(state.rafId);
     state.phaseIndex = 0;
     state.roundCount = 0;
+    state.phaseProgress = 0;
     setBreath(0);
     applyPhaseVisual(0, true);
     phaseWord.textContent = "ready";
@@ -728,6 +760,15 @@
     }
   });
   resetBtn.addEventListener("click", resetSession);
+
+  const followBtn = $("followBtn");
+  followBtn.addEventListener("click", () => {
+    state.breathPaced = !state.breathPaced;
+    followBtn.setAttribute("aria-pressed", String(state.breathPaced));
+    followBtn.textContent = state.breathPaced ? "🌬 Follow breath: on" : "🌬 Follow breath: off";
+    // breath-paced needs the mic — turn it on automatically (this click is the user gesture)
+    if (state.breathPaced && !mic.on) startMic();
+  });
 
   /* ============================================================
      Settings wiring
